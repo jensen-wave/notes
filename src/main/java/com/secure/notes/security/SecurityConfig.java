@@ -8,6 +8,7 @@ import com.secure.notes.repositories.UserRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -20,7 +21,14 @@ import java.time.LocalDate;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
-@Configuration // 告訴 Spring 這是一個組態類別，會自動建立 Spring Bean
+// 告訴 Spring 這是一個組態類別，會自動建立 Spring Bean
+@Configuration
+// 加上這個註解來啟用方法層級安全
+@EnableMethodSecurity(
+        prePostEnabled = true,  // 啟用 @PreAuthorize 和 @PostAuthorize
+        securedEnabled = true,  // 啟用 @Secured
+        jsr250Enabled = true    // 啟用 JSR-250 標準的 @RolesAllowed
+)
 public class SecurityConfig {
 
     // 建立 SecurityFilterChain Bean，配置安全策略
