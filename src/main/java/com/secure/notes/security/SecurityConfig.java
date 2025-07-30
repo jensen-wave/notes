@@ -10,96 +10,104 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.provisioning.JdbcUserDetailsManager;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
-
-import javax.sql.DataSource; // 要用 JDBC 驗證，需注入資料來源
 
 import java.time.LocalDate;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
-// 告訴 Spring 這是一個組態類別，會自動建立 Spring Bean
+/**
+ * Spring Security 的主要設定檔。
+ * @Configuration 標示這是一個 Spring 的設定類別，Spring 容器會掃描並處理其中的 Bean。
+ */
 @Configuration
-// 加上這個註解來啟用方法層級安全
+/**
+ * @EnableMethodSecurity 啟用方法層級的安全性控制。
+ * 這允許我們在個別的 Controller 方法上使用 @PreAuthorize, @PostAuthorize, @Secured 等註解來進行更細粒度的權限控制。
+ * - prePostEnabled = true: 啟用 @PreAuthorize 和 @PostAuthorize 註解。
+ * - securedEnabled = true: 啟用 @Secured 註解。
+ * - jsr250Enabled = true: 啟用 JSR-250 標準的 @RolesAllowed 註解。
+ */
 @EnableMethodSecurity(
-        prePostEnabled = true,  // 啟用 @PreAuthorize 和 @PostAuthorize
-        securedEnabled = true,  // 啟用 @Secured
-        jsr250Enabled = true    // 啟用 JSR-250 標準的 @RolesAllowed
-)
+        prePostEnabled = true,
+        securedEnabled = true,
+        jsr250Enabled = true)
 public class SecurityConfig {
 
-    // 建立 SecurityFilterChain Bean，配置安全策略
+    /**
+     * 定義一個 SecurityFilterChain Bean，這是 Spring Security 6.x 之後的核心設定方式。
+     * 它定義了 HTTP 請求的安全處理規則鏈。
+     *
+     * @param http HttpSecurity 物件，用來建構安全規則。
+     * @return 一個建構好的 SecurityFilterChain 實例。
+     * @throws Exception 可能拋出的例外。
+     */
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
-        // 1. 所有請求都要通過身份驗證
-        http.authorizeHttpRequests((requests) -> requests.anyRequest().authenticated());
+        // 設定 HTTP 請求的授權規則
+        http.authorizeHttpRequests((requests) -> requests
+                // 規則 1: 任何對 "/api/admin/**" 路徑的請求，使用者必須擁有 "ADMIN" 角色。
+                // 注意：hasRole("ADMIN") 會自動尋找名為 "ROLE_ADMIN" 的權限，不需要手動加上 "ROLE_" 前綴。
+                //.requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-        // 2. 關閉 CSRF 保護（適用於 REST API 或非瀏覽器環境）
-        http.csrf(csrf -> csrf.disable());
+                // 規則 2: 任何對 "/public/**" 路徑的請求，都允許存取 (permitAll)。
+                // 這通常用於公開資源，如登入頁面、靜態檔案等，無需登入即可存取。
+                //.requestMatchers("/public/**").permitAll()
 
-        // 3. 啟用 HTTP Basic 認證方式（簡單帳密視窗）
+                // 規則 3 (兜底規則): 除了上述規則之外的任何其他請求 (anyRequest)，都必須經過身份驗證 (authenticated)。
+                .anyRequest().authenticated()
+        );
+
+        // 停用 CSRF (跨站請求偽造) 保護。
+        // 對於無狀態的 RESTful API，通常會停用 CSRF，因為客戶端（如手機 App）不會像瀏覽器一樣自動發送 Cookie。
+        http.csrf(AbstractHttpConfigurer::disable);
+
+        // 啟用 HTTP Basic Authentication。
+        // 這會彈出一個瀏覽器內建的簡單登入視窗，要求輸入使用者名稱和密碼。
         http.httpBasic(withDefaults());
 
-        // 4. 返回建構好的 SecurityFilterChain 物件
+        // 建構並返回 SecurityFilterChain 物件。
         return http.build();
     }
 
-//    // 建立 JDBC-based UserDetailsService，從資料庫取得帳號資料
-//    @Bean
-//    public UserDetailsService userDetailsService(DataSource dataSource) {
-//        // 使用 JDBC 的方式從資料庫存取使用者資訊
-//        JdbcUserDetailsManager manager = new JdbcUserDetailsManager(dataSource);
-//
-//        // 檢查是否已存在使用者 "user1"，若無則建立 USER 角色帳號
-//        if (!manager.userExists("user1")) {
-//            manager.createUser(
-//                    User.withUsername("user1")
-//                            .password("{noop}password1") // {noop} 代表密碼未加密（僅限開發測試）
-//                            .roles("USER") // 賦予 USER 角色
-//                            .build()
-//            );
-//        }
-//
-//        // 檢查是否已存在使用者 "admin"，若無則建立 ADMIN 角色帳號
-//        if (!manager.userExists("admin")) {
-//            manager.createUser(
-//                    User.withUsername("admin")
-//                            .password("{noop}adminPass") // 密碼未加密
-//                            .roles("ADMIN") // 賦予 ADMIN 角色
-//                            .build()
-//            );
-//        }
-//
-//        // 返回 UserDetailsService 實例
-//        return manager;
-//    }
-
+    /**
+     * 定義一個 CommandLineRunner Bean，它會在 Spring Boot 應用程式啟動完成後自動執行。
+     * 主要用途是在開發階段初始化資料庫，建立預設的角色和使用者帳號，方便測試。
+     *
+     * @param roleRepository Role 的資料存取庫。
+     * @param userRepository User 的資料存取庫。
+     * @return 一個 CommandLineRunner 實例。
+     */
     @Bean
-    public CommandLineRunner initData(RoleRepository roleRepository, UserRepository userRepository) {
+    public CommandLineRunner initData(RoleRepository roleRepository,
+                                      UserRepository userRepository) {
         return args -> {
+            // 初始化 "USER" 角色：先嘗試尋找，如果不存在，則建立並儲存一個新的。
             Role userRole = roleRepository.findByRoleName(AppRole.ROLE_USER)
                     .orElseGet(() -> roleRepository.save(new Role(AppRole.ROLE_USER)));
 
+            // 初始化 "ADMIN" 角色：同樣地，先尋找，若無則建立。
             Role adminRole = roleRepository.findByRoleName(AppRole.ROLE_ADMIN)
                     .orElseGet(() -> roleRepository.save(new Role(AppRole.ROLE_ADMIN)));
 
+            // 檢查名為 "user1" 的使用者是否存在，如果不存在，則建立一個普通使用者。
             if (!userRepository.existsByUserName("user1")) {
                 User user1 = new User("user1", "user1@example.com", "{noop}password1");
-                user1.setAccountNonLocked(false);
-                user1.setAccountNonExpired(true);
-                user1.setCredentialsNonExpired(true);
-                user1.setEnabled(true);
-                user1.setCredentialsExpiryDate(LocalDate.now().plusYears(1));
-                user1.setAccountExpiryDate(LocalDate.now().plusYears(1));
-                user1.setTwoFactorEnabled(false);
-                user1.setSignUpMethod("email");
-                user1.setRole(userRole);
-                userRepository.save(user1);
+                // {noop} 表示密碼是純文字，未經加密。這只適用於開發和測試環境！
+                user1.setAccountNonLocked(true); // 帳號未鎖定
+                user1.setAccountNonExpired(true); // 帳號未過期
+                user1.setCredentialsNonExpired(true); // 憑證未過期
+                user1.setEnabled(true); // 帳號已啟用
+                user1.setCredentialsExpiryDate(LocalDate.now().plusYears(1)); // 憑證一年後過期
+                user1.setAccountExpiryDate(LocalDate.now().plusYears(1)); // 帳號一年後過期
+                user1.setTwoFactorEnabled(false); // 禁用兩步驟驗證
+                user1.setSignUpMethod("email"); // 註冊方式
+                user1.setRole(userRole); // 設定角色為 "USER"
+                userRepository.save(user1); // 儲存到資料庫
             }
 
+            // 檢查名為 "admin" 的使用者是否存在，如果不存在，則建立一個管理員。
             if (!userRepository.existsByUserName("admin")) {
                 User admin = new User("admin", "admin@example.com", "{noop}adminPass");
                 admin.setAccountNonLocked(true);
@@ -110,8 +118,8 @@ public class SecurityConfig {
                 admin.setAccountExpiryDate(LocalDate.now().plusYears(1));
                 admin.setTwoFactorEnabled(false);
                 admin.setSignUpMethod("email");
-                admin.setRole(adminRole);
-                userRepository.save(admin);
+                admin.setRole(adminRole); // 設定角色為 "ADMIN"
+                userRepository.save(admin); // 儲存到資料庫
             }
         };
     }
