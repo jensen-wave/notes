@@ -47,13 +47,7 @@ public class SecurityConfig {
      * @throws Exception 可能拋出的例外。
      */
 
-    private CustomLoggingFilter customLoggingFilter;
-    private RequestValidationFilter requestValidationFilter;
 
-    public SecurityConfig(CustomLoggingFilter customLoggingFilter, RequestValidationFilter requestValidationFilter) {
-        this.customLoggingFilter = customLoggingFilter;
-        this.requestValidationFilter = requestValidationFilter;
-    }
 
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
@@ -75,12 +69,6 @@ public class SecurityConfig {
         // 對於無狀態的 RESTful API，通常會停用 CSRF，因為客戶端（如手機 App）不會像瀏覽器一樣自動發送 Cookie。
         http.csrf(AbstractHttpConfigurer::disable);
 
-        // 將我們的自訂日誌過濾器，加在 UsernamePasswordAuthenticationFilter 之前
-        http.addFilterBefore(this.customLoggingFilter, UsernamePasswordAuthenticationFilter.class);
-
-        // 將 RequestValidationFilter 加在 CustomLoggingFilter 之後
-        http.addFilterAfter(new RequestValidationFilter(),
-                CustomLoggingFilter.class);
 
         // 啟用 HTTP Basic Authentication。
         // 這會彈出一個瀏覽器內建的簡單登入視窗，要求輸入使用者名稱和密碼。
