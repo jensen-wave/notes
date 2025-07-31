@@ -15,6 +15,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 import java.time.LocalDate;
 
@@ -22,6 +23,7 @@ import static org.springframework.security.config.Customizer.withDefaults;
 
 /**
  * Spring Security 的主要設定檔。
+ *
  * @Configuration 標示這是一個 Spring 的設定類別，Spring 容器會掃描並處理其中的 Bean。
  */
 @Configuration
@@ -46,36 +48,50 @@ public class SecurityConfig {
      * @return 一個建構好的 SecurityFilterChain 實例。
      * @throws Exception 可能拋出的例外。
      */
-
-
-
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
-        // 設定 HTTP 請求的授權規則
+        // --- 1. 設定 CSRF (跨站請求偽造) 保護 ---
+        http.csrf(csrf ->
+                csrf
+                        // 規則 1.1: 忽略特定路徑的 CSRF 保護。
+                        // 所有符合 "/api/auth/public/**" 模式的請求將不會進行 CSRF Token 驗證。
+                        // 這適用於不需要保護的公開 API。
+                        .ignoringRequestMatchers("/api/auth/public/**")
+                        // 規則 1.2: 設定 CSRF Token 的儲存庫。
+                        // CookieCsrfTokenRepository 會將 Token 存放在 Cookie 中。
+                        // withHttpOnlyFalse() 允許客戶端的 JavaScript 讀取這個 Cookie，這對於 SPA (單頁應用) 前端至關重要。
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()));
+
+        // --- 2. 設定 HTTP 請求的授權規則 ---
         http.authorizeHttpRequests((requests) -> requests
-                // 規則 1: 任何對 "/api/admin/**" 路徑的請求，使用者必須擁有 "ADMIN" 角色。
-                // 注意：hasRole("ADMIN") 會自動尋找名為 "ROLE_ADMIN" 的權限，不需要手動加上 "ROLE_" 前綴。
-                //.requestMatchers("/api/admin/**").hasRole("ADMIN")
-
-                // 規則 2: 任何對 "/public/**" 路徑的請求，都允許存取 (permitAll)。
-                // 這通常用於公開資源，如登入頁面、靜態檔案等，無需登入即可存取。
-                //.requestMatchers("/public/**").permitAll()
-
-                // 規則 3 (兜底規則): 除了上述規則之外的任何其他請求 (anyRequest)，都必須經過身份驗證 (authenticated)。
+                // 規則 2.1: 任何對 "/api/csrf-token" 路徑的請求，都允許存取 (permitAll)。
+                // 這讓未登入的使用者也能獲取 CSRF Token。
+                .requestMatchers("/api/csrf-token").permitAll()
+                // 規則 2.2 (兜底規則): 除了上述規則之外的任何其他請求 (anyRequest)，都必須經過身份驗證 (authenticated)。
                 .anyRequest().authenticated()
         );
 
-        // 停用 CSRF (跨站請求偽造) 保護。
-        // 對於無狀態的 RESTful API，通常會停用 CSRF，因為客戶端（如手機 App）不會像瀏覽器一樣自動發送 Cookie。
-        http.csrf(AbstractHttpConfigurer::disable);
-
-
+        // --- 3. 設定認證方式 ---
         // 啟用 HTTP Basic Authentication。
         // 這會彈出一個瀏覽器內建的簡單登入視窗，要求輸入使用者名稱和密碼。
         http.httpBasic(withDefaults());
+        // 啟用表單登入 (Form Login)。
+        // 這會提供一個預設的登入頁面。
+        http.formLogin(withDefaults());
 
-        // 建構並返回 SecurityFilterChain 物件。
+        // --- 4. 建構並返回 SecurityFilterChain 物件 ---
         return http.build();
+    }
+
+    /**
+     * 定義一個密碼編碼器 Bean。
+     * 使用 BCrypt 演算法來安全地雜湊和驗證密碼。
+     *
+     * @return 一個 BCryptPasswordEncoder 實例。
+     */
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
 
     /**
@@ -84,6 +100,7 @@ public class SecurityConfig {
      *
      * @param roleRepository Role 的資料存取庫。
      * @param userRepository User 的資料存取庫。
+     * @param passwordEncoder 密碼編碼器，用於加密預設密碼。
      * @return 一個 CommandLineRunner 實例。
      */
     @Bean
@@ -91,6 +108,7 @@ public class SecurityConfig {
                                       UserRepository userRepository,
                                       PasswordEncoder passwordEncoder) {
         return args -> {
+            // --- 初始化角色 ---
             // 初始化 "USER" 角色：先嘗試尋找，如果不存在，則建立並儲存一個新的。
             Role userRole = roleRepository.findByRoleName(AppRole.ROLE_USER)
                     .orElseGet(() -> roleRepository.save(new Role(AppRole.ROLE_USER)));
@@ -99,10 +117,11 @@ public class SecurityConfig {
             Role adminRole = roleRepository.findByRoleName(AppRole.ROLE_ADMIN)
                     .orElseGet(() -> roleRepository.save(new Role(AppRole.ROLE_ADMIN)));
 
+            // --- 初始化使用者 ---
             // 檢查名為 "user1" 的使用者是否存在，如果不存在，則建立一個普通使用者。
             if (!userRepository.existsByUserName("user1")) {
-                User user1 = new User("user1", "user1@example.com", passwordEncoder().encode("password1"));
-                // {noop} 表示密碼是純文字，未經加密。這只適用於開發和測試環境！
+                User user1 = new User("user1", "user1@example.com",
+                        passwordEncoder.encode("password1")); // 使用 passwordEncoder 加密密碼
                 user1.setAccountNonLocked(true); // 帳號未鎖定
                 user1.setAccountNonExpired(true); // 帳號未過期
                 user1.setCredentialsNonExpired(true); // 憑證未過期
@@ -117,7 +136,8 @@ public class SecurityConfig {
 
             // 檢查名為 "admin" 的使用者是否存在，如果不存在，則建立一個管理員。
             if (!userRepository.existsByUserName("admin")) {
-                User admin = new User("admin", "admin@example.com", passwordEncoder().encode("adminPass"));
+                User admin = new User("admin", "admin@example.com",
+                        passwordEncoder.encode("adminPass")); // 使用 passwordEncoder 加密密碼
                 admin.setAccountNonLocked(true);
                 admin.setAccountNonExpired(true);
                 admin.setCredentialsNonExpired(true);
@@ -130,10 +150,5 @@ public class SecurityConfig {
                 userRepository.save(admin); // 儲存到資料庫
             }
         };
-    }
-
-    @Bean
-    public PasswordEncoder passwordEncoder(){
-        return new BCryptPasswordEncoder();
     }
 }
