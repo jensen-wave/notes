@@ -5,14 +5,19 @@ import com.secure.notes.models.Role;
 import com.secure.notes.models.User;
 import com.secure.notes.repositories.RoleRepository;
 import com.secure.notes.repositories.UserRepository;
+import com.secure.notes.security.jwt.AuthTokenFilter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
@@ -40,6 +45,18 @@ import static org.springframework.security.config.Customizer.withDefaults;
         jsr250Enabled = true)
 public class SecurityConfig {
 
+
+    // 注入我們自定義的認證失敗處理器
+    @Autowired
+   private AuthenticationEntryPoint unauthorizedHandler;
+
+
+
+    // 將自定義的 AuthTokenFilter 宣告為一個 Bean
+    @Bean
+    public AuthTokenFilter authenticationJwtTokenFilter() {
+        return new AuthTokenFilter();
+    }
     /**
      * 定義一個 SecurityFilterChain Bean，這是 Spring Security 6.x 之後的核心設定方式。
      * 它定義了 HTTP 請求的安全處理規則鏈。
@@ -67,6 +84,8 @@ public class SecurityConfig {
                 // 規則 2.1: 任何對 "/api/csrf-token" 路徑的請求，都允許存取 (permitAll)。
                 // 這讓未登入的使用者也能獲取 CSRF Token。
                 .requestMatchers("/api/csrf-token").permitAll()
+                .requestMatchers("/api/auth/public/**").permitAll()
+
                 // 規則 2.2 (兜底規則): 除了上述規則之外的任何其他請求 (anyRequest)，都必須經過身份驗證 (authenticated)。
                 .anyRequest().authenticated()
         );
@@ -79,9 +98,23 @@ public class SecurityConfig {
         // 這會提供一個預設的登入頁面。
         http.formLogin(withDefaults());
 
+
+
+// 1. 設定例外處理的進入點
+        http.exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler));
+
+// 2. 在指定的過濾器之前，加入我們的自定義過濾器
+        http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
         // --- 4. 建構並返回 SecurityFilterChain 物件 ---
         return http.build();
     }
+
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
+        return authenticationConfiguration.getAuthenticationManager();
+    }
+
 
     /**
      * 定義一個密碼編碼器 Bean。

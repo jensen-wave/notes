@@ -1,4 +1,4 @@
-package com.yourpackage.security.jwt; // 請替換成您的專案套件路徑
+package com.secure.notes.security.jwt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
