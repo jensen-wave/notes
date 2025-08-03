@@ -1,9 +1,17 @@
 package com.secure.notes.controllers;
 
 // 導入相關類別和套件
+import com.secure.notes.models.AppRole;
+import com.secure.notes.models.Role;
+import com.secure.notes.models.User;
+import com.secure.notes.repositories.RoleRepository;
+import com.secure.notes.repositories.UserRepository;
 import com.secure.notes.security.jwt.JwtUtils;           // 自定義 JWT 工具類
 import com.secure.notes.security.request.LoginRequest;   // 登入請求資料傳輸物件
+import com.secure.notes.security.request.SignupRequest;
 import com.secure.notes.security.response.LoginResponse; // 登入回應資料傳輸物件
+import com.secure.notes.security.response.MessageResponse;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;       // Spring 依賴注入註解
 import org.springframework.http.HttpStatus;                         // HTTP 狀態碼列舉
 import org.springframework.http.ResponseEntity;                     // Spring HTTP 回應封裝類
@@ -13,14 +21,17 @@ import org.springframework.security.core.Authentication;            // Spring Se
 import org.springframework.security.core.AuthenticationException;   // Spring Security 認證失敗異常基類
 import org.springframework.security.core.context.SecurityContextHolder; // Security 上下文持有者，管理當前線程的安全資訊
 import org.springframework.security.core.userdetails.UserDetails;   // Spring Security 用戶詳細資訊介面
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.PostMapping;         // Spring Web POST 請求映射註解
 import org.springframework.web.bind.annotation.RequestBody;         // 請求體參數註解
 import org.springframework.web.bind.annotation.RequestMapping;      // 請求路徑映射註解
 import org.springframework.web.bind.annotation.RestController;      // REST 控制器註解
 
+import java.time.LocalDate;
 import java.util.HashMap;      // Java HashMap 實現類
 import java.util.List;         // Java List 介面
 import java.util.Map;          // Java Map 介面
+import java.util.Set;
 import java.util.stream.Collectors; // Java Stream API 收集器工具
 
 /**
@@ -42,6 +53,15 @@ public class AuthController {
      */
     @Autowired
     JwtUtils jwtUtils;
+
+    @Autowired
+    UserRepository userRepository;
+
+    @Autowired
+    RoleRepository roleRepository;
+
+    @Autowired
+    PasswordEncoder encoder;
 
     /**
      * Spring Security 認證管理器依賴注入
@@ -200,4 +220,61 @@ public class AuthController {
          */
         return ResponseEntity.ok(response);
     }
+
+
+    @PostMapping("/public/signup")
+    public ResponseEntity<?> registerUser(@Valid @RequestBody SignupRequest signUpRequest) {
+        // 檢查1：使用者名稱是否已存在
+        if (userRepository.existsByUserName(signUpRequest.getUsername())) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: Username is already taken!"));
+        }
+
+        // 檢查2：Email 是否已存在
+        if (userRepository.existsByEmail(signUpRequest.getEmail())) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: Email is already in use!"));
+        }
+
+        // 步驟1：建立新使用者帳號，並加密密碼
+        User user = new User(signUpRequest.getUsername(),
+                signUpRequest.getEmail(),
+                encoder.encode(signUpRequest.getPassword()));
+
+        // 步驟2：處理與指派角色
+        Set<String> strRoles = signUpRequest.getRole();
+        Role role;
+
+        if (strRoles == null || strRoles.isEmpty()) {
+            // 如果請求中未指定角色，給予預設的 USER 角色
+            role = roleRepository.findByRoleName(AppRole.ROLE_USER)
+                    .orElseThrow(() -> new RuntimeException("Error: Role is not found."));
+        } else {
+            // 根據請求中的角色字串，指派對應的角色
+            String roleStr = strRoles.iterator().next();
+            if (roleStr.equals("admin")) {
+                role = roleRepository.findByRoleName(AppRole.ROLE_ADMIN)
+                        .orElseThrow(() -> new RuntimeException("Error: Role is not found."));
+            } else {
+                role = roleRepository.findByRoleName(AppRole.ROLE_USER)
+                        .orElseThrow(() -> new RuntimeException("Error: Role is not found."));
+            }
+        }
+        user.setRole(role);
+
+        // 步驟3：設定使用者帳號的預設屬性
+        user.setAccountNonLocked(true);
+        user.setAccountNonExpired(true);
+        user.setCredentialsNonExpired(true);
+        user.setEnabled(true);
+        user.setCredentialsExpiryDate(LocalDate.now().plusYears(1));
+        user.setAccountExpiryDate(LocalDate.now().plusYears(1));
+        user.setTwoFactorEnabled(false);
+        user.setSignUpMethod("email"); // 記錄註冊方式
+
+        // 步驟4：儲存使用者到資料庫
+        userRepository.save(user);
+
+        // 步驟5：回傳成功訊息
+        return ResponseEntity.ok(new MessageResponse("User registered successfully!"));
+    }
+
 }
