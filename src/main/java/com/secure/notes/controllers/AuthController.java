@@ -11,6 +11,8 @@ import com.secure.notes.security.request.LoginRequest;   // 登入請求資料�
 import com.secure.notes.security.request.SignupRequest;
 import com.secure.notes.security.response.LoginResponse; // 登入回應資料傳輸物件
 import com.secure.notes.security.response.MessageResponse;
+import com.secure.notes.security.response.UserInfoResponse;
+import com.secure.notes.services.UserService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;       // Spring 依賴注入註解
 import org.springframework.http.HttpStatus;                         // HTTP 狀態碼列舉
@@ -19,13 +21,11 @@ import org.springframework.security.authentication.AuthenticationManager;       
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken; // 用戶名密碼認證 Token 類
 import org.springframework.security.core.Authentication;            // Spring Security 認證結果介面
 import org.springframework.security.core.AuthenticationException;   // Spring Security 認證失敗異常基類
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.context.SecurityContextHolder; // Security 上下文持有者，管理當前線程的安全資訊
 import org.springframework.security.core.userdetails.UserDetails;   // Spring Security 用戶詳細資訊介面
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.bind.annotation.PostMapping;         // Spring Web POST 請求映射註解
-import org.springframework.web.bind.annotation.RequestBody;         // 請求體參數註解
-import org.springframework.web.bind.annotation.RequestMapping;      // 請求路徑映射註解
-import org.springframework.web.bind.annotation.RestController;      // REST 控制器註解
+import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.HashMap;      // Java HashMap 實現類
@@ -62,6 +62,9 @@ public class AuthController {
 
     @Autowired
     PasswordEncoder encoder;
+
+    @Autowired
+    UserService userService;
 
     /**
      * Spring Security 認證管理器依賴注入
@@ -275,6 +278,35 @@ public class AuthController {
 
         // 步驟5：回傳成功訊息
         return ResponseEntity.ok(new MessageResponse("User registered successfully!"));
+    }
+
+    @GetMapping("/user")
+    public ResponseEntity<?> getUserDetails(@AuthenticationPrincipal UserDetails userDetails) {
+        // 步驟 1: 透過 username 取得完整的 User Entity 物件
+        User user = userService.findByUsername(userDetails.getUsername());
+
+        // 步驟 2: 從 UserDetails 中提取使用者的角色 (Authorities)
+        List<String> roles = userDetails.getAuthorities().stream()
+                .map(item -> item.getAuthority())
+                .collect(Collectors.toList());
+
+        // 步驟 3: 準備回傳給前端的 DTO 物件
+        UserInfoResponse response = new UserInfoResponse(
+                user.getUserId(),
+                user.getUserName(),
+                user.getEmail(),
+                user.isAccountNonLocked(),
+                user.isAccountNonExpired(),
+                user.isCredentialsNonExpired(),
+                user.isEnabled(),
+                user.getCredentialsExpiryDate(),
+                user.getAccountExpiryDate(),
+                user.isTwoFactorEnabled(),
+                roles // 將提取出的角色列表放入
+        );
+
+        // 步驟 4: 回傳 200 OK 狀態碼及使用者資訊
+        return ResponseEntity.ok().body(response);
     }
 
 }
